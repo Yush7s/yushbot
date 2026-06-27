@@ -5,6 +5,7 @@ import pytest
 import requests
 
 from osint_logic import (
+    _detect_country,
     get_ip_info,
     phone_lookup,
     resolve_dns,
@@ -149,6 +150,36 @@ class TestSearchUsername:
                 assert "status" in r
 
 
+# ---- _detect_country ---- #
+
+
+class TestDetectCountry:
+    def test_detects_brazil(self):
+        country, prefix = _detect_country("+5511999998888")
+        assert country == "BR"
+        assert prefix == "+55"
+
+    def test_detects_us(self):
+        country, prefix = _detect_country("+14158586273")
+        assert country == "US/CA"
+        assert prefix == "+1"
+
+    def test_detects_portugal(self):
+        country, prefix = _detect_country("+351912345678")
+        assert country == "PT"
+        assert prefix == "+351"
+
+    def test_returns_none_for_unknown_prefix(self):
+        country, prefix = _detect_country("+99912345678")
+        assert country is None
+        assert prefix is None
+
+    def test_longer_prefix_takes_priority(self):
+        country, prefix = _detect_country("+351123456")
+        assert prefix == "+351"
+        assert country == "PT"
+
+
 # ---- phone_lookup ---- #
 
 
@@ -159,30 +190,28 @@ class TestPhoneLookup:
         resp.status_code = status_code
         return resp
 
-    def test_valid_number_returns_data(self):
-        fake_data = {
-            "valid": True,
-            "number": "14158586273",
-            "local_format": "4158586273",
-            "international_format": "+14158586273",
-            "country_prefix": "+1",
-            "country_code": "US",
-            "country_name": "United States of America",
-            "location": "Novato",
-            "carrier": "AT&T Mobility LLC",
-            "line_type": "mobile",
-        }
-        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_data)):
-            result = phone_lookup("+14158586273")
-            assert result["valid"] is True
-            assert result["country_code"] == "US"
-            assert result["carrier"] == "AT&T Mobility LLC"
+    def test_brazilian_number_detected(self):
+        fake_ip_data = {"country": "Brazil", "query": "1.2.3.4"}
+        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_ip_data)):
+            result = phone_lookup("+5511999998888")
+            assert result["country_code"] == "BR"
+            assert result["country_prefix"] == "+55"
+            assert result["local_number"] == "11999998888"
+            assert result["valid_format"] is True
 
-    def test_invalid_number_returns_invalid(self):
-        fake_data = {"valid": False, "number": "123", "error": "invalid"}
-        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_data)):
-            result = phone_lookup("123")
-            assert result["valid"] is False
+    def test_us_number_detected(self):
+        fake_ip_data = {"country": "United States", "query": "1.2.3.4"}
+        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_ip_data)):
+            result = phone_lookup("+14158586273")
+            assert result["country_code"] == "US/CA"
+            assert result["country_prefix"] == "+1"
+
+    def test_number_without_plus_gets_prefixed(self):
+        fake_ip_data = {"country": "Brazil", "query": "1.2.3.4"}
+        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_ip_data)):
+            result = phone_lookup("5511999998888")
+            assert result["number"] == "+5511999998888"
+            assert result["country_code"] == "BR"
 
     def test_raises_on_empty_input(self):
         with pytest.raises(ValueError, match="Invalid phone number"):
@@ -193,31 +222,41 @@ class TestPhoneLookup:
             phone_lookup("abc")
 
     def test_cleans_number_format(self):
-        fake_data = {"valid": True, "number": "5511999998888"}
-        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_data)) as mock_get:
-            phone_lookup("+55 (11) 99999-8888")
-            call_url = mock_get.call_args[0][0]
-            assert "number=+5511999998888" in call_url
+        fake_ip_data = {"country": "Brazil", "query": "1.2.3.4"}
+        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_ip_data)):
+            result = phone_lookup("+55 (11) 99999-8888")
+            assert result["number"] == "+5511999998888"
+            assert result["country_code"] == "BR"
 
-    def test_fallback_when_api_returns_no_valid_field(self):
-        fake_data = {"error": "API key required"}
-        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_data)):
-            result = phone_lookup("+5511999998888")
-            assert result["valid"] is False
-            assert "error" in result
+    def test_short_number_invalid_format(self):
+        fake_ip_data = {"country": "Unknown", "query": "1.2.3.4"}
+        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_ip_data)):
+            result = phone_lookup("+1234")
+            assert result["valid_format"] is False
 
-    def test_fallback_on_api_error(self):
+    def test_unknown_country_prefix(self):
+        fake_ip_data = {"country": "Unknown", "query": "1.2.3.4"}
+        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_ip_data)):
+            result = phone_lookup("+99912345678")
+            assert result["country_code"] == "Unknown"
+            assert result["country_prefix"] == "Unknown"
+
+    def test_api_failure_still_returns_result(self):
         with mock.patch(
             "osint_logic.requests.get",
-            return_value=self._mock_response({}, status_code=500),
+            side_effect=requests.ConnectionError("offline"),
         ):
             result = phone_lookup("+5511999998888")
-            assert result["valid"] is False
+            assert result["country_code"] == "BR"
+            assert result["number"] == "+5511999998888"
+            assert "lookup_origin_country" not in result
 
-    def test_network_timeout_raises(self):
-        with mock.patch(
-            "osint_logic.requests.get",
-            side_effect=requests.Timeout("timed out"),
-        ):
-            with pytest.raises(requests.Timeout):
-                phone_lookup("+14158586273")
+    def test_result_has_required_keys(self):
+        fake_ip_data = {"country": "Brazil", "query": "1.2.3.4"}
+        with mock.patch("osint_logic.requests.get", return_value=self._mock_response(fake_ip_data)):
+            result = phone_lookup("+5511999998888")
+            assert "number" in result
+            assert "local_number" in result
+            assert "country_code" in result
+            assert "country_prefix" in result
+            assert "valid_format" in result

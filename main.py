@@ -76,7 +76,7 @@ def phone_search():
 # ---------------- INTERFACE ---------------- #
 
 janela = tk.Tk()
-janela.title("Painel OSINT! Github: NicholasDev01")
+janela.title("Painel OSINT! Github: Yush Surface")
 janela.geometry("760x540")
 janela.configure(bg="#1e1e2f")
 
@@ -89,7 +89,7 @@ style.configure(
 
 titulo = ttk.Label(
     janela,
-    text="Painel OSINT! Github: NicholasDev01",
+    text="Painel OSINT! Github: Yush Surface",
     font=("Segoe UI", 16, "bold"),
 )
 titulo.pack(pady=10)
@@ -129,7 +129,7 @@ resultado = tk.Text(
 resultado.pack(padx=10, pady=10)
 
 rodape = ttk.Label(
-    janela, text="OSINT - Uso educacional e legal! Github: NicholasDev01"
+    janela, text="OSINT - Uso educacional e legal! Github: Yush Surface"
 )
 rodape.pack(pady=5)
 
