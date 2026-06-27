@@ -64,9 +64,23 @@ def phone_search():
     try:
         info = phone_lookup(number)
         limpar_resultado()
-        resultado.insert(tk.END, f"Resultados para numero: {number}\n\n")
-        for k, v in info.items():
-            resultado.insert(tk.END, f"{k}: {v}\n")
+        resultado.insert(tk.END, f"=== Resultados para numero: {number} ===\n\n")
+        resultado.insert(tk.END, f"Numero limpo: {info['number']}\n")
+        resultado.insert(tk.END, f"Numero local: {info['local_number']}\n")
+        resultado.insert(tk.END, f"Pais: {info['country_code']}\n")
+        resultado.insert(tk.END, f"Prefixo: {info['country_prefix']}\n")
+        resultado.insert(tk.END, f"Formato valido: {'Sim' if info['valid_format'] else 'Nao'}\n")
+        resultado.insert(tk.END, f"\n--- Busca Online ({len(info['online_results'])} plataformas) ---\n\n")
+        for r in info["online_results"]:
+            if r["status"] == "accessible":
+                resultado.insert(tk.END, f"[+] {r['platform']}: {r['url']}\n")
+            elif r["status"] == "not_found":
+                resultado.insert(tk.END, f"[-] {r['platform']}: nao encontrado\n")
+            else:
+                resultado.insert(tk.END, f"[!] {r['platform']}: erro na requisicao\n")
+        resultado.insert(tk.END, f"\n--- Links para busca manual ---\n\n")
+        for platform, url in info["search_links"].items():
+            resultado.insert(tk.END, f"  {platform}: {url}\n")
     except ValueError as e:
         messagebox.showerror("Erro", str(e))
     except Exception:

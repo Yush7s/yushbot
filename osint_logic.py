@@ -1,4 +1,7 @@
+import re
 import socket
+import urllib.parse
+
 import requests
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -106,20 +109,67 @@ def _detect_country(number):
     return None, None
 
 
-def phone_lookup(number):
-    """Look up information about a phone number.
-
-    Validates the number format, detects the country from the prefix,
-    and queries a free API for additional info when available.
-
-    Returns a dict with phone number details.
-    """
+def _clean_phone_number(number):
+    """Clean and normalize a phone number string."""
     cleaned = "".join(c for c in number if c.isdigit() or c == "+")
     if not cleaned or not any(c.isdigit() for c in cleaned):
         raise ValueError("Invalid phone number")
-
     if not cleaned.startswith("+"):
         cleaned = "+" + cleaned
+    return cleaned
+
+
+def _build_phone_search_urls(number):
+    """Build search/lookup URLs for a phone number across platforms."""
+    digits_only = number.lstrip("+")
+    encoded = urllib.parse.quote(number)
+
+    return {
+        "Google": f"https://www.google.com/search?q=%22{encoded}%22",
+        "Google (dork)": f"https://www.google.com/search?q=intext%3A%22{encoded}%22",
+        "Facebook": f"https://www.facebook.com/search/top/?q={encoded}",
+        "WhatsApp": f"https://wa.me/{digits_only}",
+        "Telegram": f"https://t.me/+{digits_only}",
+        "Truecaller": f"https://www.truecaller.com/search/br/{digits_only}",
+        "Sync.me": f"https://sync.me/search/?number={encoded}",
+        "CallerID": f"https://calleridtest.com/look-up/{digits_only}",
+        "NumLookup": f"https://www.numlookup.com/br/numero/{digits_only}",
+        "Tellows": f"https://www.tellows.com.br/num/{digits_only}",
+    }
+
+
+def _search_phone_online(number):
+    """Search for a phone number across platforms.
+
+    Returns a list of dicts with keys: platform, url, status.
+    status is 'accessible', 'not_found', or 'error'.
+    """
+    urls = _build_phone_search_urls(number)
+    results = []
+    for platform, url in urls.items():
+        try:
+            r = requests.get(
+                url, headers=HEADERS, timeout=REQUEST_TIMEOUT, allow_redirects=True
+            )
+            if r.status_code == 200:
+                status = "accessible"
+            else:
+                status = "not_found"
+        except requests.RequestException:
+            status = "error"
+        results.append({"platform": platform, "url": url, "status": status})
+    return results
+
+
+def phone_lookup(number):
+    """Look up information about a phone number.
+
+    Validates the number, detects country, searches across platforms
+    and search engines for registered data and online presence.
+
+    Returns a dict with phone number details and online search results.
+    """
+    cleaned = _clean_phone_number(number)
 
     country, prefix = _detect_country(cleaned)
     local_number = cleaned[len(prefix):] if prefix else cleaned.lstrip("+")
@@ -130,18 +180,10 @@ def phone_lookup(number):
         "country_code": country if country else "Unknown",
         "country_prefix": prefix if prefix else "Unknown",
         "valid_format": len(local_number) >= 6,
+        "search_links": _build_phone_search_urls(cleaned),
+        "online_results": [],
     }
 
-    try:
-        response = requests.get(
-            f"http://ip-api.com/json/",
-            timeout=REQUEST_TIMEOUT,
-        )
-        if response.status_code == 200:
-            data = response.json()
-            result["lookup_origin_country"] = data.get("country", "Unknown")
-            result["lookup_origin_ip"] = data.get("query", "Unknown")
-    except requests.RequestException:
-        pass
+    result["online_results"] = _search_phone_online(cleaned)
 
     return result
